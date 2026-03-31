@@ -1,0 +1,34 @@
+name: Run Xueqiu Spider
+
+on:
+  workflow_dispatch: # 允许你手动点击按钮运行
+  schedule:
+    - cron: '0 10 * * *' # 每天北京时间 18:00 自动运行 (UTC 10:00)
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v3
+
+      - name: 设置 Python 环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: 安装依赖库
+        run: |
+          pip install -r requirements.txt
+
+      - name: 运行爬虫脚本
+        run: |
+          python main.py
+
+      - name: 提交结果到仓库
+        run: |
+          git config --global user.email "action@github.com"
+          git config --global user.name "GitHub Action"
+          git add results/*.csv
+          git commit -m "Auto-update: 爬取结果" || exit 0
+          git push
