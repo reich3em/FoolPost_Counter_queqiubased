@@ -1,9 +1,16 @@
 name: Run Xueqiu Spider
 
 on:
-  workflow_dispatch: # 允许你手动点击按钮运行
-  schedule:
-    - cron: '0 10 * * *' # 每天北京时间 18:00 自动运行 (UTC 10:00)
+  workflow_dispatch:
+    inputs:
+      stock_symbol:
+        description: '请输入股票代码 (例如: SH600519)'
+        required: true
+        default: 'SH600519'
+      target_date:
+        description: '请输入日期 (格式: YYYY-MM-DD)'
+        required: true
+        default: '2024-05-20'
 
 jobs:
   build:
@@ -22,6 +29,10 @@ jobs:
           pip install -r requirements.txt
 
       - name: 运行爬虫脚本
+        env:
+          # 把你在界面输入的值，传递给 Python 代码里的变量
+          STOCK_CODE: ${{ github.event.inputs.stock_symbol }}
+          TARGET_DAY: ${{ github.event.inputs.target_date }}
         run: |
           python main.py
 
@@ -29,6 +40,7 @@ jobs:
         run: |
           git config --global user.email "action@github.com"
           git config --global user.name "GitHub Action"
-          git add results/*.csv
-          git commit -m "Auto-update: 爬取结果" || exit 0
+          # 允许提交新生成的 CSV 文件
+          git add results/*.csv || true
+          git commit -m "Auto-update: ${STOCK_CODE} ${TARGET_DAY} 结果" || exit 0
           git push
