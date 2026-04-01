@@ -1,16 +1,17 @@
-name: EastMoney Guba Spider
+name: EastMoney Guba Spider (Manual)
 
 on:
-  push:
-    branches: [ main ]
-  schedule:
-    - cron: '0 1 * * *' # 每天凌晨1点自动运行
-  workflow_dispatch: # 支持手动触发
+  workflow_dispatch: # 开启手动触发
+    inputs:
+      stock_code:
+        description: '请输入要爬取的股票代码 (如: 600900, 000001)'
+        required: true
+        default: '600900'
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions: # 赋予提交权限
+    permissions:
       contents: write
       
     steps:
@@ -28,7 +29,8 @@ jobs:
 
       - name: Run Spider
         env:
-          STOCK_CODE: "600900" # 你可以修改为你感兴趣的代码
+          # 注意：这里引用了你手动输入的参数
+          STOCK_CODE: ${{ github.event.inputs.stock_code }}
         run: python main.py
 
       - name: Commit and Push
@@ -36,5 +38,6 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add .
-          git commit -m "Update guba data [skip ci]" || exit 0
+          # 使用变量名动态生成提交信息
+          git commit -m "Update data for ${{ github.event.inputs.stock_code }} [skip ci]" || exit 0
           git push
