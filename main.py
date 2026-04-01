@@ -2,71 +2,95 @@ import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 import os
-import re
+import time
 
-def get_guba_robust(stock_code):
-    # 兼容处理输入，提取纯数字
+def get_guba_deep_scan(stock_code, max_page=50):
+    # 提取纯数字代码
     code_num = "".join(filter(str.isdigit, stock_code))
-    url = f"https://guba.eastmoney.com/list,{code_num}.html"
-    
+    all_results = []
+    seen_titles = set()
+
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
         "Referer": "https://guba.eastmoney.com/",
         "Accept-Language": "zh-CN,zh;q=0.9"
     }
 
-    try:
-        print(f"📡 正在探测战场 | 目标股票: {code_num}")
-        response = requests.get(url, headers=headers, timeout=15)
-        response.encoding = 'utf-8'
-        
-        if response.status_code == 200:
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # 策略：直接抓取所有包含 "news,代码" 的超链接，这是帖子的固定特征
-            # 链接示例: /news,600900,1445678.html
-            pattern = re.compile(f'/news,{code_num},\\d+\\.html')
-            links = soup.find_all('a', href=pattern)
-            
-            results = []
-            seen_titles = set() # 去重
+    print(f"🚀 开始深度扫描 | 目标: {code_num} | 计划爬取: {max_page} 页")
 
-            for link in links:
-                title = link.get_text(strip=True)
-                href = link.get('href')
-                
-                # 过滤掉太短的标题（比如“回复”、“更多”）
-                if len(title) > 5 and title not in seen_titles:
-                    # 尝试寻找同一行内的阅读数/评论数 (通常在父节点的父节点里)
-                    parent_text = link.parent.parent.get_text("|", strip=True)
-                    # 简单切分获取大致数据
-                    parts = parent_text.split("|")
-                    
-                    results.append({
-                        "标题": title,
-                        "链接": "https://guba.eastmoney.com" + href,
-                        "大致预览": parent_text[:50] # 保留原始行数据供参考
-                    })
-                    seen_titles.add(title)
-
-            if results:
-                df = pd.DataFrame(results)
-                print(f"🎊 抓取成功！有效帖子数: {len(df)}")
-                print(df[['标题']].head(10))
-                
-                output_file = f"guba_{code_num}.csv"
-                df.to_csv(output_file, index=False, encoding='utf-8-sig')
-                print(f"💾 数据已存入: {output_file}")
-            else:
-                # 如果还是没找到，打印一部分源码辅助排查
-                print("⚠️ 未能提取到链接，HTML 结构可能已通过 JS 混淆。")
-                print("源码片段预览:", response.text[:500])
+    for page in range(1, max_page + 1):
+        # 构建翻页 URL
+        if page == 1:
+            url = f"https://guba.eastmoney.com/list,{code_num}.html"
         else:
-            print(f"❌ 访问失败，状态码: {response.status_code}")
+            url = f"https://guba.eastmoney.com/list,{code_num}_{page}.html"
+        
+        try:
+            response = requests.get(url, headers=headers, timeout=15)
+            response.encoding = 'utf-8'
+            
+            if response.status_code != 200:
+                print(f"⚠️ 第 {page} 页访问受阻 (状态码: {response.status_code})，停止翻页。")
+                break
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            # 同时兼容多种可能的 HTML 结构
+            items = soup.select('tr.listitem') or soup.select('div.articleh')
+            
+            if not items:
+                print(f"🛑 第 {page} 页未发现内容，可能已达末尾。")
+                break
 
-    except Exception as e:
-        print(f"💥 运行异常: {e}")
+            page_count = 0
+            for item in items:
+                # 1. 标题提取 (排除置顶/广告/无效链接)
+                title_tag = item.select_one('a[href*="news,"]')
+                if not title_tag: continue
+                
+                title = title_tag.get_text(strip=True)
+                # 过滤掉短标题和重复项
+                if len(title) < 4 or title in seen_titles: continue
+
+                # 2. 作者 ID
+                author_tag = item.select_one('.l4 a') or item.select_one('.nickname a')
+                author_id = author_tag.get_text(strip=True) if author_tag else "未知用户"
+
+                # 3. 最后更新时间
+                time_tag = item.select_one('.l5') or item.select_one('.update')
+                update_time = time_tag.get_text(strip=True) if time_tag else "未知时间"
+
+                all_results.append({
+                    "股票代码": code_num,
+                    "标题": title,
+                    "作者ID": author_id,
+                    "最后更新": update_time
+                })
+                seen_titles.add(title)
+                page_count += 1
+
+            print(f"✅ 第 {page}/{max_page} 页处理完成，新增 {page_count} 条记录。")
+            
+            # 💡 核心：模仿人类行为的 2.1s 延迟
+            if page < max_page:
+                time.sleep(2.1)
+
+        except Exception as e:
+            print(f"💥 第 {page} 页发生错误: {e}")
+            break
+
+    # 保存结果
+    if all_results:
+        df = pd.DataFrame(all_results)
+        output_file = f"guba_{code_num}_deep.csv"
+        # 使用 utf-8-sig 确保 Excel 打开中文不乱码
+        df.to_csv(output_file, index=False, encoding='utf-8-sig')
+        print(f"\n✨ 深度扫描任务结束！")
+        print(f"📊 总计抓取: {len(df)} 条数据")
+        print(f"💾 文件已保存: {output_file}")
+    else:
+        print("❌ 任务失败，未获得任何有效数据。")
 
 if __name__ == "__main__":
+    # 从 Actions 传入的环境变量获取代码
     stock = os.getenv("STOCK_CODE", "600900")
-    get_guba_robust(stock)
+    get_guba_deep_scan(stock, max_page=50)
