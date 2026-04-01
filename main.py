@@ -1,63 +1,72 @@
 import requests
-from bs4 import BeautifulSoup # 注意：这里增加了依赖
+from bs4 import BeautifulSoup
 import pandas as pd
 import os
-import time
+import re
 
-def get_guba_html(stock_code):
-    # 提取数字代码
+def get_guba_robust(stock_code):
+    # 兼容处理输入，提取纯数字
     code_num = "".join(filter(str.isdigit, stock_code))
-    # 网页版列表地址
     url = f"https://guba.eastmoney.com/list,{code_num}.html"
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
         "Referer": "https://guba.eastmoney.com/",
-        "Cookie": "qgqp_b_id=123456" # 随便写点基础Cookie模拟真人
+        "Accept-Language": "zh-CN,zh;q=0.9"
     }
 
     try:
-        print(f"🕵️ 改用网页解析法 | 目标: {url}")
+        print(f"📡 正在探测战场 | 目标股票: {code_num}")
         response = requests.get(url, headers=headers, timeout=15)
-        response.encoding = 'utf-8' # 强制编码，防止乱码
+        response.encoding = 'utf-8'
         
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # 东财最新的帖子列表通常在 class 为 'articleh' 的 div 里
-            # 或者在 tr 标签里。这里我们寻找所有的列表项
-            items = soup.select('.listitem') or soup.select('tr')
+            # 策略：直接抓取所有包含 "news,代码" 的超链接，这是帖子的固定特征
+            # 链接示例: /news,600900,1445678.html
+            pattern = re.compile(f'/news,{code_num},\\d+\\.html')
+            links = soup.find_all('a', href=pattern)
             
-            processed_data = []
-            print(f"找到候选行数: {len(items)}")
+            results = []
+            seen_titles = set() # 去重
 
-            for item in items:
-                try:
-                    # 尝试抓取标题和作者（东财网页结构经常微调，这里用选择器兼容）
-                    title_node = item.select_one('.l3 a') or item.select_one('a[title]')
-                    author_node = item.select_one('.l4 a') or item.select_one('.nickname')
+            for link in links:
+                title = link.get_text(strip=True)
+                href = link.get('href')
+                
+                # 过滤掉太短的标题（比如“回复”、“更多”）
+                if len(title) > 5 and title not in seen_titles:
+                    # 尝试寻找同一行内的阅读数/评论数 (通常在父节点的父节点里)
+                    parent_text = link.parent.parent.get_text("|", strip=True)
+                    # 简单切分获取大致数据
+                    parts = parent_text.split("|")
                     
-                    if title_node and author_node:
-                        processed_data.append({
-                            "标题": title_node.get_text(strip=True),
-                            "作者": author_node.get_text(strip=True),
-                            "链接": "https://guba.eastmoney.com" + title_node.get('href', '')
-                        })
-                except:
-                    continue
+                    results.append({
+                        "标题": title,
+                        "链接": "https://guba.eastmoney.com" + href,
+                        "大致预览": parent_text[:50] # 保留原始行数据供参考
+                    })
+                    seen_titles.add(title)
 
-            if processed_data:
-                df = pd.DataFrame(processed_data)
-                print(f"✅ 解析成功！提取到 {len(df)} 条帖子")
-                print(df.head(5))
-                df.to_csv("guba_data.csv", index=False, encoding='utf-8-sig')
+            if results:
+                df = pd.DataFrame(results)
+                print(f"🎊 抓取成功！有效帖子数: {len(df)}")
+                print(df[['标题']].head(10))
+                
+                output_file = f"guba_{code_num}.csv"
+                df.to_csv(output_file, index=False, encoding='utf-8-sig')
+                print(f"💾 数据已存入: {output_file}")
             else:
-                print("⚠️ 网页内容已拿到，但没解析出帖子，可能是结构变了。")
+                # 如果还是没找到，打印一部分源码辅助排查
+                print("⚠️ 未能提取到链接，HTML 结构可能已通过 JS 混淆。")
+                print("源码片段预览:", response.text[:500])
         else:
-            print(f"❌ 网页请求依然失败，状态码: {response.status_code}")
+            print(f"❌ 访问失败，状态码: {response.status_code}")
 
     except Exception as e:
         print(f"💥 运行异常: {e}")
 
 if __name__ == "__main__":
-    get_guba_html(os.getenv("STOCK_CODE", "600900"))
+    stock = os.getenv("STOCK_CODE", "600900")
+    get_guba_robust(stock)
