@@ -28,4 +28,4 @@ jobs:
     - name: 运行爬虫程序
       env:
         STOCK_CODE: ${{ github.event.inputs.stock_id }}
-      run: python scraper.py
+      run: python main.py
