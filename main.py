@@ -1,53 +1,42 @@
 import requests
 import os
 import pandas as pd
+import time
+import random
 
 def get_snowball_comments(stock_code):
-    # 模拟真实浏览器的身份信息
+    # 1. 更加真实的浏览器身份标识 (User-Agent)
+    # 模拟 Windows 电脑上的 Chrome 浏览器
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer": "https://xueqiu.com"
+        "Referer": f"https://xueqiu.com/S/{stock_code}",
+        "Accept": "application/json, text/plain, */*"
     }
     
-    # 使用 Session 保持状态
+    # 创建一个 Session 对象，它会自动帮我们处理 Cookie
     session = requests.Session()
-    # 1. 先访问首页，获取必要的 Cookie
-    session.get("https://xueqiu.com", headers=headers)
     
-    # 2. 爬取指定股票的讨论接口
-    # 注意：count=20 表示获取最近20条
-    url = f"https://xueqiu.com/query/v1/symbol/status/list.json?symbol={stock_code}&count=20&source=user"
-    
-    print(f"正在抓取 {stock_code} 的讨论...")
-    response = session.get(url, headers=headers)
-    
-    if response.status_code == 200:
-        data = response.json().get('list', [])
-        if not data:
-            print("❌ 未获取到讨论内容，可能是代码输入错误或 API 变动。")
-            return
+    try:
+        # 第一步：先访问股票主页，诱导服务器给我们分发 Cookie
+        print(f"--- 正在连接雪球网，准备爬取 {stock_code} ---")
+        session.get(f"https://xueqiu.com/S/{stock_code}", headers=headers, timeout=10)
+        
+        # 第二步：模拟人工随机等待，避开简单的机器检测
+        wait_time = random.uniform(2.1, 4.8) 
+        print(f"☕ 模拟人类操作中... 随机等待 {wait_time:.2f} 秒")
+        time.sleep(wait_time)
+        
+        # 第三步：请求真正的讨论列表接口
+        # count=15 表示取最近的 15 条
+        api_url = f"https://xueqiu.com/query/v1/symbol/status/list.json?symbol={stock_code}&count=15&source=user"
+        
+        response = session.get(api_url, headers=headers, timeout=10)
+        print(f"服务器响应状态码: {response.status_code}")
+        
+        if response.status_code == 200:
+            json_data = response.json()
+            comment_list = json_data.get('list', [])
             
-        # 整理数据
-        comments = []
-        for item in data:
-            comments.append({
-                "时间": item.get("created_at"),
-                "内容": item.get("description"), # description 通常包含纯文本
-                "作者": item.get("user", {}).get("screen_name")
-            })
-            
-        df = pd.DataFrame(comments)
-        # 打印在日志里让你直接看到
-        for index, row in df.head(10).iterrows():
-            print(f"[{row['作者']}]: {row['内容'][:100]}...\n")
-            
-        # 存成 CSV 文件
-        df.to_csv(f"{stock_code}_data.csv", index=False, encoding='utf-8-sig')
-        print(f"✅ 成功！数据已保存至 {stock_code}_data.csv")
-    else:
-        print(f"❌ 抓取失败，错误码：{response.status_code}")
-
-if __name__ == "__main__":
-    # 优先从环境变量读取 GitHub 输入的代码
-    stock = os.getenv("STOCK_CODE", "SH600900")
-    get_snowball_comments(stock)
+            if not comment_list:
+                print("⚠️ 没拿到讨论数据。可能原因：该股票近期无讨论，或被雪球反爬虫拦截。")
+                # 打印前100个字符看看服务器
