@@ -1,53 +1,36 @@
-import json
+import requests
+import sys
 import os
-import pandas as pd
-from datetime import datetime
 
-# 从 GitHub Actions 的环境变量中获取参数，如果没有则使用默认值
-STOCK_CODE = os.getenv('STOCK_CODE', 'SH600519')
-TARGET_DAY = os.getenv('TARGET_DAY', '2026-03-27') # 修改了默认日期匹配你的数据
-
-def main():
-    print(f"开始分析 {STOCK_CODE} 在 {TARGET_DAY} 的发言...")
+def get_snowball_comments(stock_code):
+    # 模拟浏览器头，雪球需要这个，否则会拦截
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://xueqiu.com"
+    }
     
-    # 确保结果文件夹存在
-    if not os.path.exists('results'):
-        os.makedirs('results')
-
-    # 读取数据 (假设你的数据文件叫 data.json)
-    try:
-        with open('data.json', 'r', encoding='utf-8') as f:
-            data = json.load(f)
-    except FileNotFoundError:
-        print("❌ 找不到 data.json 文件，请确保数据已上传。")
-        return
-
-    results = []
-    for item in data.get('list', []):
-        # 时间戳转换
-        dt = datetime.fromtimestamp(item.get('created_at') / 1000)
-        day_str = dt.strftime('%Y-%m-%d')
-        
-        # 股票代码匹配
-        symbols = [s.get('symbol') for s in item.get('symbols', [])]
-        
-        if day_str == TARGET_DAY and STOCK_CODE in symbols:
-            results.append({
-                '时间': dt.strftime('%H:%M:%S'),
-                '用户': item.get('user', {}).get('screen_name'),
-                '内容': item.get('text', '')[:50] # 截取前50字
-            })
-
-    if results:
-        df = pd.DataFrame(results)
-        file_path = f"results/{STOCK_CODE}_{TARGET_DAY}.csv"
-        df.to_csv(file_path, index=False, encoding='utf-8-sig')
-        print(f"✅ 成功！找到 {len(results)} 条发言，已保存至 {file_path}")
+    # 1. 获取 Session（雪球需要先访问主页拿 Cookie）
+    session = requests.Session()
+    session.get("https://xueqiu.com", headers=headers)
+    
+    # 2. 爬取讨论（这是一个示例 URL，雪球的 API 可能随时间变化）
+    url = f"https://xueqiu.com/query/v1/symbol/status/list.json?symbol={stock_code}&count=10&source=user"
+    
+    response = session.get(url, headers=headers)
+    
+    if response.status_code == 200:
+        data = response.json()
+        print(f"--- {stock_code} 的最新讨论 ---")
+        for comment in data.get('list', []):
+            print(f"- {comment.get('text')[:50]}...") # 只打印前50个字
     else:
-        # 关键修改：找不到数据时，创建一个空的 CSV 防止 GitHub Action 报错
-        print(f"⚠️ {TARGET_DAY} 没有关于 {STOCK_CODE} 的讨论。")
-        with open(f"results/no_data.csv", "w") as f:
-            f.write("status\nno_data_found")
+        print(f"爬取失败，状态码：{response.status_code}")
 
 if __name__ == "__main__":
-    main()
+    # 从 GitHub Actions 的环境变量中读取输入的股票代码
+    code = os.getenv("STOCK_CODE")
+    if not code:
+        # 如果环境变量没拿到，就看命令行参数
+        code = sys.argv[1] if len(sys.argv) > 1 else "SH000001"
+    
+    get_snowball_comments(code)
