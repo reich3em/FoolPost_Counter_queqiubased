@@ -1,72 +1,78 @@
 import requests
-import os
+import re
+import json
 import pandas as pd
+import os
 import time
 import random
 
-def get_snowball_comments(stock_code):
-    # 模拟更全面的浏览器头部
+def get_eastmoney_data(stock_code):
+    # 提取数字代码，例如从 "SH600900" 提取 "600900"
+    code_num = re.findall(r'\d+', stock_code)[0]
+    
+    # 东财股吧分页接口
+    # p=1 表示第一页，ps=30 表示每页30条
+    url = f"https://guba.eastmoney.com/interface/Getter.aspx?s=bar&name={code_num}&type=1&p=1&ps=30"
+    
     headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-        "Accept-Language": "zh-CN,zh;q=0.9",
-        "Host": "xueqiu.com",
-        "Connection": "keep-alive"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": f"https://guba.eastmoney.com/list,{code_num}.html",
+        "X-Requested-With": "XMLHttpRequest",
+        "Accept": "application/json, text/javascript, */*; q=0.01"
     }
-    
-    # 使用 session 自动管理 Cookie
-    session = requests.Session()
-    
+
     try:
-        print(f"--- 尝试绕过拦截，正在连接雪球 ({stock_code}) ---")
+        print(f"🚀 开始驾驭东方财富股吧 | 目标代码: {code_num}")
         
-        # 1. 模拟打开雪球首页获取基础 Cookie
-        session.get("https://xueqiu.com/", headers=headers, timeout=10)
+        # 模拟随机延迟，避免被识别为暴力爬虫
+        time.sleep(random.uniform(1, 3))
         
-        # 2. 模拟进入股票详情页
-        detail_url = f"https://xueqiu.com/S/{stock_code}"
-        session.get(detail_url, headers=headers, timeout=10)
-        
-        # 3. 随机等待，模拟人类阅读
-        wait_time = random.uniform(3.5, 6.2)
-        print(f"☕ 正在解析页面数据，随机等待 {wait_time:.2f} 秒...")
-        time.sleep(wait_time)
-        
-        # 4. 更新 API 请求的 Headers (关键：需要增加 Referer)
-        api_headers = headers.copy()
-        api_headers["Referer"] = detail_url
-        api_headers["Accept"] = "application/json, text/plain, */*"
-        
-        api_url = f"https://xueqiu.com/query/v1/symbol/status/list.json?symbol={stock_code}&count=15&source=user"
-        
-        response = session.get(api_url, headers=api_headers, timeout=10)
+        response = requests.get(url, headers=headers, timeout=15)
         
         if response.status_code == 200:
-            res_json = response.json()
-            if res_json.get("success") is True:
-                comment_list = res_json.get('list', [])
-                
-                processed_data = []
-                for item in comment_list:
-                    user_name = item.get("user", {}).get("screen_name", "匿名")
-                    raw_text = item.get("text", "") or item.get("description", "")
-                    clean_text = raw_text.replace("<br/>", " ").replace("</p>", "").replace("<p>", "")
-                    processed_data.append({"作者": user_name, "内容": clean_text})
-                
-                df = pd.DataFrame(processed_data)
-                print(f"✅ 成功抓取到 {len(df)} 条讨论！")
-                print(df.head(3))
-                
-                df.to_csv(f"{stock_code}_comments.csv", index=False, encoding='utf-8-sig')
+            # 清洗可能的 JSONP 包装
+            raw_text = response.text.strip()
+            # 如果返回的是 jQuery123({...}) 格式，提取括号内的内容
+            json_str = re.search(r'\{.*\}', raw_text)
+            
+            if json_str:
+                data = json.loads(json_str.group())
+                if 're' in data and data['re'] is not None:
+                    post_list = data['re']
+                    processed = []
+                    for post in post_list:
+                        processed.append({
+                            "阅读": post.get("readcount"),
+                            "评论": post.get("replycount"),
+                            "标题": post.get("title"),
+                            "作者": post.get("nickname"),
+                            "最后更新": post.get("update_time"),
+                            "链接": f"https://guba.eastmoney.com/news,{code_num},{post.get('post_id')}.html"
+                        })
+                    
+                    df = pd.DataFrame(processed)
+                    print(f"✅ 抓取成功！获取到 {len(df)} 条最新动态。")
+                    
+                    # 打印前 5 条预览
+                    print("-" * 30)
+                    print(df[['标题', '作者']].head(5))
+                    print("-" * 30)
+                    
+                    # 保存 CSV
+                    output_file = "guba_data.csv"
+                    df.to_csv(output_file, index=False, encoding='utf-8-sig')
+                    print(f"💾 数据已存入: {output_file}")
+                else:
+                    print("⚠️ 接口返回成功但没有帖子数据，可能该股较冷门或触发了频率限制。")
             else:
-                print(f"❌ API 拒绝访问。错误码: {res_json.get('code')}")
-                print(f"服务器回复: {response.text}")
+                print(f"❌ 无法解析返回数据格式: {raw_text[:100]}")
         else:
-            print(f"❌ 网络请求失败，状态码: {response.status_code}")
+            print(f"❌ 请求失败，HTTP 状态码: {response.status_code}")
 
     except Exception as e:
-        print(f"❌ 程序崩溃: {e}")
+        print(f"💥 运行崩溃: {str(e)}")
 
 if __name__ == "__main__":
-    stock = os.getenv("STOCK_CODE", "SH600900")
-    get_snowball_comments(stock)
+    # 从环境变量读取，默认长江电力
+    target_stock = os.getenv("STOCK_CODE", "600900")
+    get_eastmoney_data(target_stock)
