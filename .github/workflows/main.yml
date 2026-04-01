@@ -1,46 +1,31 @@
-name: Run Xueqiu Spider
+name: Snowball Scraper
 
+# 定义触发方式：手动触发 (workflow_dispatch)
 on:
   workflow_dispatch:
     inputs:
-      stock_symbol:
-        description: '请输入股票代码 (例如: SH600519)'
+      stock_id:
+        description: '请输入股票代码 (例如: SH000001, SZ000002)'
         required: true
-        default: 'SH600519'
-      target_date:
-        description: '请输入日期 (格式: YYYY-MM-DD)'
-        required: true
-        default: '2024-05-20'
+        default: 'SH000001'
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v3
+    - name: 检出代码
+      uses: actions/checkout@v4
 
-      - name: 设置 Python 环境
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
+    - name: 安装 Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
 
-      - name: 安装依赖库
-        run: |
-          pip install -r requirements.txt
+    - name: 安装依赖包
+      run: pip install -r requirements.txt
 
-      - name: 运行爬虫脚本
-        env:
-          # 把你在界面输入的值，传递给 Python 代码里的变量
-          STOCK_CODE: ${{ github.event.inputs.stock_symbol }}
-          TARGET_DAY: ${{ github.event.inputs.target_date }}
-        run: |
-          python main.py
-
-      - name: 提交结果到仓库
-        run: |
-          git config --global user.email "action@github.com"
-          git config --global user.name "GitHub Action"
-          # 允许提交新生成的 CSV 文件
-          git add results/*.csv || true
-          git commit -m "Auto-update: ${STOCK_CODE} ${TARGET_DAY} 结果" || exit 0
-          git push
+    - name: 运行爬虫程序
+      env:
+        STOCK_CODE: ${{ github.event.inputs.stock_id }}
+      run: python scraper.py
