@@ -3,9 +3,9 @@ from bs4 import BeautifulSoup
 import pandas as pd
 import os
 import time
+from datetime import datetime
 
 def get_guba_deep_scan(stock_code, max_page=500):
-    # 提取纯数字代码
     code_num = "".join(filter(str.isdigit, stock_code))
     all_results = []
     seen_titles = set()
@@ -16,81 +16,76 @@ def get_guba_deep_scan(stock_code, max_page=500):
         "Accept-Language": "zh-CN,zh;q=0.9"
     }
 
-    print(f"🚀 开始深度扫描 | 目标: {code_num} | 计划爬取: {max_page} 页")
+    # 获取当前时间用于文件名
+    now_str = datetime.now().strftime("%Y%m%d-%H%M")
+    
+    print(f"🚀 启动超级扫描 | 目标: {code_num} | 深度上限: {max_page} 页")
 
     for page in range(1, max_page + 1):
-        # 构建翻页 URL
-        if page == 1:
-            url = f"https://guba.eastmoney.com/list,{code_num}.html"
-        else:
-            url = f"https://guba.eastmoney.com/list,{code_num}_{page}.html"
+        url = f"https://guba.eastmoney.com/list,{code_num}_{page}.html" if page > 1 else f"https://guba.eastmoney.com/list,{code_num}.html"
         
         try:
             response = requests.get(url, headers=headers, timeout=15)
             response.encoding = 'utf-8'
             
             if response.status_code != 200:
-                print(f"⚠️ 第 {page} 页访问受阻 (状态码: {response.status_code})，停止翻页。")
+                print(f"⚠️ 第 {page} 页访问受阻 (状态码: {response.status_code})")
                 break
             
             soup = BeautifulSoup(response.text, 'html.parser')
-            # 同时兼容多种可能的 HTML 结构
             items = soup.select('tr.listitem') or soup.select('div.articleh')
             
             if not items:
-                print(f"🛑 第 {page} 页未发现内容，可能已达末尾。")
+                print(f"🛑 第 {page} 页未发现内容，可能已达东财显示极限。")
                 break
 
-            page_count = 0
+            page_new_count = 0
             for item in items:
-                # 1. 标题提取 (排除置顶/广告/无效链接)
                 title_tag = item.select_one('a[href*="news,"]')
                 if not title_tag: continue
                 
                 title = title_tag.get_text(strip=True)
-                # 过滤掉短标题和重复项
-                if len(title) < 4 or title in seen_titles: continue
+                if len(title) < 4: continue
 
-                # 2. 作者 ID
-                author_tag = item.select_one('.l4 a') or item.select_one('.nickname a')
-                author_id = author_tag.get_text(strip=True) if author_tag else "未知用户"
+                # 记录总条数，但不一定每一条都存（去重）
+                if title not in seen_titles:
+                    author_tag = item.select_one('.l4 a') or item.select_one('.nickname a')
+                    author_id = author_tag.get_text(strip=True) if author_tag else "未知用户"
+                    time_tag = item.select_one('.l5') or item.select_one('.update')
+                    update_time = time_tag.get_text(strip=True) if time_tag else "未知时间"
 
-                # 3. 最后更新时间
-                time_tag = item.select_one('.l5') or item.select_one('.update')
-                update_time = time_tag.get_text(strip=True) if time_tag else "未知时间"
+                    all_results.append({
+                        "股票代码": code_num,
+                        "标题": title,
+                        "作者ID": author_id,
+                        "最后更新": update_time
+                    })
+                    seen_titles.add(title)
+                    page_new_count += 1
 
-                all_results.append({
-                    "股票代码": code_num,
-                    "标题": title,
-                    "作者ID": author_id,
-                    "最后更新": update_time
-                })
-                seen_titles.add(title)
-                page_count += 1
-
-            print(f"✅ 第 {page}/{max_page} 页处理完成，新增 {page_count} 条记录。")
+            print(f"✅ 第 {page}/{max_page} 页: 新增 {page_new_count} 条")
             
-            # 💡 核心：模仿人类行为的 2.1s 延迟
-            if page < max_page:
-                time.sleep(2.1)
+            # 如果连续 5 页都没有新增，说明全是重复内容，提前结束以节省资源
+            if page_new_count == 0 and page > 50:
+                print("📝 检测到连续重复内容，判定已抓取完毕。")
+                break
+
+            time.sleep(2.2) # 500页量大，稍微增加一点延迟保护IP
 
         except Exception as e:
-            print(f"💥 第 {page} 页发生错误: {e}")
+            print(f"💥 第 {page} 页错误: {e}")
             break
 
-    # 保存结果
     if all_results:
         df = pd.DataFrame(all_results)
-        output_file = f"guba_{code_num}_deep.csv"
-        # 使用 utf-8-sig 确保 Excel 打开中文不乱码
+        # 格式：代码-日期-时间.csv
+        output_file = f"{code_num}-{now_str}.csv"
         df.to_csv(output_file, index=False, encoding='utf-8-sig')
-        print(f"\n✨ 深度扫描任务结束！")
-        print(f"📊 总计抓取: {len(df)} 条数据")
-        print(f"💾 文件已保存: {output_file}")
+        print(f"\n✨ 任务完成！总抓取: {len(df)} 条 | 文件: {output_file}")
     else:
-        print("❌ 任务失败，未获得任何有效数据。")
+        print("❌ 未获得有效数据")
 
 if __name__ == "__main__":
-    # 从 Actions 传入的环境变量获取代码
     stock = os.getenv("STOCK_CODE", "600900")
-    get_guba_deep_scan(stock, max_page=50)
+    # 这里确保传参是 500
+    get_guba_deep_scan(stock, max_page=500)
