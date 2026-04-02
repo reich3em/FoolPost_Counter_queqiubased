@@ -4,7 +4,7 @@ import pandas as pd
 import os
 import time
 
-def get_guba_deep_scan(stock_code, max_page=50):
+def get_guba_deep_scan(stock_code, max_page=500):
     # 提取纯数字代码
     code_num = "".join(filter(str.isdigit, stock_code))
     all_results = []
