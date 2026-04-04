@@ -5,6 +5,7 @@ import os
 import time
 import random
 import re
+from datetime import datetime
 
 def get_stock_list(max_count):
     """从 stocks.txt 中提取前 max_count 个股票代码"""
@@ -14,36 +15,37 @@ def get_stock_list(max_count):
         return []
     
     try:
-        # 自动识别空格或制表符分隔，跳过表头
+        # 自动识别空格或制表符分隔，并跳过表头
         df = pd.read_csv(file_path, sep=r'\s+', encoding='utf-8')
-        # 提取第一列 '代码'
+        # 提取第一列，通常是'代码'
         raw_codes = df.iloc[:, 0].tolist()
         
-        # 清洗代码：提取数字部分
+        # 清洗代码：只保留数字部分
         clean_codes = [re.sub(r'\D', '', str(c)) for c in raw_codes if str(c).strip()]
         
         # 只取前 max_count 个
-        selected_codes = clean_codes[:max_count]
-        return selected_codes
+        return clean_codes[:max_count]
     except Exception as e:
         print(f"❌ 读取文件出错: {e}")
         return []
 
 def scrape_guba_batch():
-    # 从环境变量获取控制参数
-    max_stocks = int(os.getenv("MAX_STOCKS", "5"))   # 默认爬前5个
-    start_page = int(os.getenv("START_PAGE", "1"))   # 起始页
-    end_page = int(os.getenv("END_PAGE", "1"))       # 结束页（每只爬几页）
+    # 获取环境变量
+    max_stocks = int(os.getenv("MAX_STOCKS", "5"))
+    start_page = int(os.getenv("START_PAGE", "1"))
+    end_page = int(os.getenv("END_PAGE", "2"))
 
     stock_list = get_stock_list(max_stocks)
     if not stock_list:
         print("⚠️ 没有可爬取的股票代码")
         return
 
-    print(f"🚀 任务开始 | 计划处理股票数: {len(stock_list)} | 每只爬取: {start_page}-{end_page}页")
+    # 🌟 核心：建立一个总列表，存放所有股票的所有数据
+    all_stocks_data = []
+
+    print(f"🚀 批量任务启动 | 目标股票数: {len(stock_list)} | 范围: {start_page}-{end_page}页")
 
     for index, code in enumerate(stock_list):
-        all_data = []
         print(f"\n({index+1}/{len(stock_list)}) 正在抓取股票: {code}...")
         
         for page in range(start_page, end_page + 1):
@@ -60,37 +62,41 @@ def scrape_guba_batch():
                 soup = BeautifulSoup(resp.text, 'html.parser')
                 items = soup.select('tr.listitem') or soup.select('div.articleh')
                 
-                page_count = 0
+                count = 0
                 for item in items:
                     title_tag = item.select_one('a[href*="news,"]')
                     if not title_tag: continue
                     
-                    all_data.append({
+                    # 🌟 将单条数据加入总列表
+                    all_stocks_data.append({
                         "股票代码": code,
                         "页码": page,
                         "标题": title_tag.get_text(strip=True),
                         "时间": (item.select_one('.l5, .update').get_text(strip=True) if item.select_one('.l5, .update') else "")
                     })
-                    page_count += 1
+                    count += 1
                 
-                print(f"  ✅ 第 {page} 页完成，获取 {page_count} 条")
-                time.sleep(random.uniform(2, 3)) # 页间延迟
+                print(f"  ✅ 第 {page} 页抓取成功 ({count}条)")
+                time.sleep(random.uniform(1.5, 3)) # 适当减少延迟提高效率
             except Exception as e:
-                print(f"  ❌ 抓取第 {page} 页出错: {e}")
+                print(f"  ❌ 抓取出错: {e}")
                 break
         
-        # 保存该股票的数据
-        if all_data:
-            df_res = pd.DataFrame(all_data)
-            filename = f"Guba_{code}_p{start_page}-{end_page}.csv"
-            df_res.to_csv(filename, index=False, encoding='utf-8-sig')
-            print(f"  💾 已保存: {filename}")
-        
-        # 换股延迟，避免封IP
+        # 换股休息，保护IP
         if index < len(stock_list) - 1:
-            wait = random.uniform(5, 8)
-            print(f"☕ 休息 {wait:.1f} 秒后处理下一只...")
-            time.sleep(wait)
+            time.sleep(random.uniform(3, 5))
+
+    # 🌟 循环结束后，统一保存为一个文件
+    if all_stocks_data:
+        df_final = pd.DataFrame(all_stocks_data)
+        # 生成带时间戳的文件名，防止覆盖
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+        filename = f"Guba_Batch_Result_{timestamp}.csv"
+        
+        df_final.to_csv(filename, index=False, encoding='utf-8-sig')
+        print(f"\n✨ 任务全部完成！总计 {len(all_stocks_data)} 条数据已写入: {filename}")
+    else:
+        print("📁 未抓取到任何数据。")
 
 if __name__ == "__main__":
     scrape_guba_batch()
