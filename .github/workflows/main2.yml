@@ -1,33 +1,32 @@
-name: Guba Range Scraper (Main2)
+name: Batch Guba Scraper (Main2)
 
 on:
   workflow_dispatch:
     inputs:
-      stock_code:
-        description: '股票代码 (如 300059)'
+      max_stocks:
+        description: '爬取前多少个股票（从 stocks.txt 顶部开始算）'
         required: true
-        default: '300059'
+        default: '5'
       start_page:
-        description: '起始页码'
+        description: '每个股票从第几页开始'
         required: true
         default: '1'
       end_page:
-        description: '结束页码'
+        description: '每个股票到第几页结束'
         required: true
-        default: '5'
+        default: '2'
 
 jobs:
-  run_main2:
+  run_task:
     runs-on: ubuntu-latest
-    # 给予写入权限，否则 push 会失败
     permissions:
       contents: write
       
     steps:
-      - name: Checkout Code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
@@ -35,18 +34,17 @@ jobs:
       - name: Install Dependencies
         run: pip install requests beautifulsoup4 pandas
 
-      - name: Execute Main2 Script
+      - name: Run Scraper
         env:
-          STOCK_CODE: ${{ github.event.inputs.stock_code }}
+          MAX_STOCKS: ${{ github.event.inputs.max_stocks }}
           START_PAGE: ${{ github.event.inputs.start_page }}
           END_PAGE: ${{ github.event.inputs.end_page }}
-        # 这里指定运行 main2.py
         run: python main2.py
 
-      - name: Commit and Push CSV
+      - name: Commit and Push
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add .
-          git commit -m "Main2: Update data for ${{ github.event.inputs.stock_code }}" || exit 0
+          git commit -m "Main2: Batch crawl result" || exit 0
           git push
